@@ -1,0 +1,57 @@
+const { defineData } = require('@aws-amplify/backend');
+
+exports.data = defineData({
+  schema: `
+    type Team @model {
+      id: ID!
+      name: String!
+      imageUrl: String
+      gameScores: [GameScore] @hasMany
+      userPicks: [UserPick] @hasMany
+      homeGames: [Game] @hasMany(indexName: "byHomeTeam", fields: ["id"])
+      awayGames: [Game] @hasMany(indexName: "byAwayTeam", fields: ["id"])
+      spreadGames: [Game] @hasMany(indexName: "bySpreadTeam", fields: ["id"])
+      winningGames: [Game] @hasMany(indexName: "byWinningTeam", fields: ["id"])
+    }
+    type Week @model {
+      id: ID!
+      description: String!
+      picksOpenUtc: AWSDateTime!
+      picksCloseUtc: AWSDateTime!
+      season: String!
+      games: [Game] @hasMany
+      userPicks: [UserPick] @hasMany
+    }
+    type Game @model {
+      id: ID!
+      weekId: ID! @index(name: "byWeek")
+      homeTeamId: ID! @index(name: "byHomeTeam")
+      awayTeamId: ID! @index(name: "byAwayTeam")
+      spreadTeamId: ID! @index(name: "bySpreadTeam")
+      spread: Float!
+      winningTeamId: ID! @index(name: "byWinningTeam")
+      gameScores: [GameScore] @hasMany
+      userPicks: [UserPick] @hasMany
+    }
+    type GameScore @model {
+      id: ID!
+      gameId: ID! @index(name: "byGame")
+      teamId: ID! @index(name: "byTeam")
+      score: Int!
+    }
+    type User @model {
+      id: ID!
+      username: String!
+      email: String!
+      userPicks: [UserPick] @hasMany
+    }
+    type UserPick @model {
+      id: ID!
+      userId: ID! @index(name: "byUser")
+      gameId: ID! @index(name: "byGame")
+      weekId: ID! @index(name: "byWeek")
+      winningTeamId: ID! @index(name: "byWinningTeam")
+      teamId: ID! @index(name: "byTeam")
+    }
+  `
+});

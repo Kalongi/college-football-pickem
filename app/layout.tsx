@@ -16,7 +16,28 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className} style={{ margin: 0, background: '#f7f7f9', minHeight: '100vh' }}>
+        <nav style={{
+          width: '100vw',
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          zIndex: 100,
+          background: '#222',
+          color: 'white',
+          padding: '1rem 0',
+          boxShadow: '0 2px 8px rgba(34,34,34,0.08)',
+          display: 'flex',
+          justifyContent: 'center',
+        }}>
+          <div style={{ display: 'flex', gap: '2rem', alignItems: 'center', fontWeight: 700, fontSize: '1.2rem' }}>
+            <a href="/" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>Home</a>
+            <a href="/mypicks" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>My Picks</a>
+            <a href="/about" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>About</a>
+          </div>
+        </nav>
+        <div style={{ paddingTop: '4.5rem', minHeight: '100vh' }}>{children}</div>
+      </body>
     </html>
   );
 }
