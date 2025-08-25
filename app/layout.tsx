@@ -33,6 +33,8 @@ export default function RootLayout({
           <div style={{ display: 'flex', gap: '2rem', alignItems: 'center', fontWeight: 700, fontSize: '1.2rem' }}>
             <a href="/" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>Home</a>
             <a href="/mypicks" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>My Picks</a>
+            <a href="/teams" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>Teams</a>
+            <a href="/admin/select-games" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>Select Games</a>
             <a href="/about" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>About</a>
           </div>
         </nav>

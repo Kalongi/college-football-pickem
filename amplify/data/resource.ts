@@ -1,17 +1,19 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
 
-/*== STEP 1 ===============================================================
-The section below creates a Todo database table with a "content" field. Try
-adding a new "isDone" field as a boolean. The authorization rule below
-specifies that any user authenticated via an API key can "create", "read",
-"update", and "delete" any "Todo" records.
-=========================================================================*/
 const schema = a.schema({
+  Conference: a.model({
+    name: a.string().required(),
+    imageUrl: a.string(),
+    smallImageUrl: a.string(),
+    teams: a.hasMany('Team', 'conferenceId'),
+  }).authorization((allow) => [allow.publicApiKey()]),
   Team: a.model({
     name: a.string().required(),
     imageUrl: a.string(),
+    conferenceId: a.id().required(),
+    conference: a.belongsTo('Conference', 'conferenceId'),
     gameScores: a.hasMany('GameScore', 'teamId'),
-    userPicks: a.hasMany('UserPick', 'teamId'),
+    userPicks: a.hasMany('UserPick', 'pickedTeamId'),
     homeGames: a.hasMany('Game', 'homeTeamId'),
     awayGames: a.hasMany('Game', 'awayTeamId'),
     spreadGames: a.hasMany('Game', 'spreadTeamId'),
@@ -58,8 +60,8 @@ const schema = a.schema({
     gameId: a.id().required(),
     weekId: a.id().required(),
     winningTeamId: a.id().required(),
-    teamId: a.id().required(),
-    team: a.belongsTo('Team', 'teamId'),
+    pickedTeamId: a.id().required(),
+    pickedTeam: a.belongsTo('Team', 'pickedTeamId'),
     user: a.belongsTo('User', 'userId'),
     game: a.belongsTo('Game', 'gameId'),
     week: a.belongsTo('Week', 'weekId'),
