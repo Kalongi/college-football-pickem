@@ -6,6 +6,7 @@ import type { Schema } from "@/amplify/data/resource";
 import { Amplify } from "aws-amplify";
 import outputs from "@/amplify_outputs.json";
 import { client as cfbdClient, getGames, getLines } from 'cfbd';
+import type { SeasonType, DivisionClassification } from 'cfbd/dist/types.gen';
 
 Amplify.configure(outputs);
 const client = generateClient<Schema>();
@@ -32,6 +33,11 @@ const SEC_TEAMS = [
   "Missouri", "Ole Miss", "South Carolina", "Tennessee", "Texas A&M", "Vanderbilt"
 ];
 
+// Normalization function for team names
+function normalizeTeamName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 function getUpcomingWindow() {
   // Get this Thursday through next Monday
   const now = new Date();
@@ -50,177 +56,391 @@ export default function SelectGamesPage() {
   const [games, setGames] = useState<any[]>([]);
   const [teams, setTeams] = useState<Schema["Team"]["type"][]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [spreads, setSpreads] = useState<any[]>([]);
+  // Filter state
+  const [year, setYear] = useState<number>(2025);
+  const [week, setWeek] = useState<number>(1);
+  const [seasonType, setSeasonType] = useState<string>('regular');
+  const [classification, setClassification] = useState<string>('fbs');
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      setError(null);
-      try {
-        // Only define thursday/monday/mondayEnd once here
-        const { thursday, monday } = getUpcomingWindow();
-        const mondayEnd = new Date(monday);
-        mondayEnd.setHours(23, 59, 59, 999);
-        // Always fetch lines for the week
-        const year = 2025;
-        const week = 1;
-        let spreadsData: any[] = [];
-        const linesResult = await getLines({
-          query: {
-            year,
-            week,
-            classification: 'fbs',
-          },
-        });
-        spreadsData = linesResult.data ?? [];
-        console.log('spreadsData', spreadsData);
-        // Fetch games for week 1 of 2025 season using cfbd
-        const gamesResult = await getGames({
-          query: {
-            year,
-            week,
-            classification: 'fbs',
-          },
-        });
-        const gamesData: any[] = gamesResult.data ?? [];
-        console.log('gamesData', gamesData);
-        // Fetch local teams
-        const { data: localTeams } = await client.models.Team.list();
-        // Map team names to local team objects
-        const teamMap: Record<string, any> = Object.fromEntries(localTeams.map((t: any) => [t.name, t]));
-        // Build the spreadMap using String(spread.id) as the key
-        const spreadMap: Record<string, { spreadTeam: string; spreadNumber: string }> = {};
-        for (const spread of spreadsData) {
-          let bestLine: any = null;
-          if (spread.lines && spread.lines.length > 0) {
-            bestLine = spread.lines.find((l: any) => l.provider === 'DraftKings')
-              || spread.lines.find((l: any) => l.provider === 'ESPN BET')
-              || spread.lines[0]; // fallback to first line if neither DK nor ESPN BET
-          }
-          if (bestLine && bestLine.formattedSpread) {
-            const parts = bestLine.formattedSpread.trim().split(/\s+/);
-            const spreadNumber = parts.pop();
-            const spreadTeam = parts.join(' ');
-            if (!spreadNumber || isNaN(Number(spreadNumber))) {
-              console.log('No valid spread number for:', bestLine.formattedSpread, spread);
-            }
-            spreadMap[String(spread.id)] = {
-              spreadTeam,
-              spreadNumber,
-            };
-          }
+  // Fetch games and lines based on filters
+  async function fetchData(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      // Fetch betting lines
+      const linesResult = await getLines({
+        query: {
+          year,
+          week,
+          classification,
+        },
+      });
+      const spreadsData = linesResult.data ?? [];
+      setSpreads(spreadsData);
+      // Fetch games
+      const gamesResult = await getGames({
+        query: {
+          year,
+          week,
+          seasonType: seasonType as SeasonType,
+          classification: classification as DivisionClassification,
+        },
+      });
+      const gamesData: any[] = gamesResult.data ?? [];
+      // Fetch local teams
+      const localTeamsResult = await (client.models.Team.list() as any);
+      const localTeams: any[] = (localTeamsResult.data as any[]);
+      // Map team names to local team objects
+      const teamMap: Record<string, any> = Object.fromEntries(localTeams.map((t: any) => [t.name, t]));
+      // Build the spreadMap using String(spread.id) as the key
+      const spreadMap: Record<string, { spreadTeam: string; spreadNumber: string }> = {};
+      for (const spread of spreadsData) {
+        let bestLine: any = null;
+        if (spread.lines && spread.lines.length > 0) {
+          bestLine = spread.lines.find((l: any) => l.provider === 'DraftKings')
+            || spread.lines.find((l: any) => l.provider === 'ESPN BET')
+            || spread.lines[0];
         }
-        // Filter games to only those involving top 50 teams, SEC teams, or UAB
-        const filteredGames = gamesData.filter((g: any) =>
-          (SEC_TEAMS.includes(g.homeTeam) ||
-          SEC_TEAMS.includes(g.awayTeam) ||
-          g.homeTeam === "UAB" ||
-          g.awayTeam === "UAB" ||
-          TOP_50_TEAMS.includes(g.homeTeam) ||
-          TOP_50_TEAMS.includes(g.awayTeam))
-        );
-        // Only display games that have a matching line in spreadMap
-        const gamesWithLines = filteredGames.filter((g: any) => spreadMap[String(g.id)]);
-        // Map and filter games for display
-        let displayGames: any[] = [];
-        if (!loading && !error) {
-          displayGames = gamesWithLines.map((g: any) => {
-            const homeTeam = g.homeTeam;
-            const awayTeam = g.awayTeam;
-            const homeLogo = teamMap[homeTeam]?.imageUrl || '';
-            const awayLogo = teamMap[awayTeam]?.imageUrl || '';
-            const dateStr = g.startDate;
-            let displayDate = '';
-            let displayTime = '';
-            if (dateStr) {
-              const parsed = new Date(dateStr);
-              if (!isNaN(parsed.getTime())) {
-                displayDate = parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-                displayTime = parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-              }
-            }
-            const spreadInfo = spreadMap[String(g.id)] || {};
-            return {
-              id: g.id,
-              homeTeam,
-              awayTeam,
-              homeLogo,
-              awayLogo,
-              spreadTeam: spreadInfo.spreadTeam || '',
-              spreadNumber: spreadInfo.spreadNumber || '',
-              displayDate,
-              displayTime,
-            };
-          });
+        if (bestLine && bestLine.formattedSpread) {
+          const parts = bestLine.formattedSpread.trim().split(/\s+/);
+          const spreadNumber = parts.pop();
+          const spreadTeam = parts.join(' ');
+          spreadMap[String(spread.id)] = {
+            spreadTeam,
+            spreadNumber,
+          };
         }
-        setGames(displayGames);
-        setTeams([]); // not needed for this display
-      } catch (err: any) {
-        console.error('Error in fetchData:', err);
-        setError(err.message || 'Unknown error');
-        setGames([]);
-      } finally {
-        setLoading(false);
       }
+      // Filter games to only those involving top 50 teams, SEC teams, or UAB
+      const filteredGames = gamesData.filter((g: any) =>
+        (SEC_TEAMS.includes(g.homeTeam) ||
+        SEC_TEAMS.includes(g.awayTeam) ||
+        g.homeTeam === "UAB" ||
+        g.awayTeam === "UAB" ||
+        TOP_50_TEAMS.includes(g.homeTeam) ||
+        TOP_50_TEAMS.includes(g.awayTeam))
+      );
+      // Only display games that have a matching line in spreadMap
+      const gamesWithLines = filteredGames.filter((g: any) => spreadMap[String(g.id)]);
+      setGames(gamesWithLines);
+      setTeams(localTeams);
+    } catch (err: any) {
+      setError(err.message || 'Unknown error');
+      setGames([]);
+    } finally {
+      setLoading(false);
     }
-    fetchData();
-  }, []);
-
-  function toggleSelect(gameId: string) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(gameId)) next.delete(gameId); else next.add(gameId);
-      return next;
-    });
   }
 
-  // Always define displayGames before the return
+  // Always define displayGames from games and teams
   const displayGames = games.map((g: any) => {
     const homeTeam = g.homeTeam;
     const awayTeam = g.awayTeam;
     const homeLogo = teams.find((t) => t.name === homeTeam)?.imageUrl || '';
     const awayLogo = teams.find((t) => t.name === awayTeam)?.imageUrl || '';
-    return { ...g, homeLogo, awayLogo };
+    const dateStr = g.startDate;
+    let displayDate = '';
+    let displayTime = '';
+    if (dateStr) {
+      const parsed = new Date(dateStr);
+      if (!isNaN(parsed.getTime())) {
+        displayDate = parsed.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+        displayTime = parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+      }
+    }
+    // Find the matching line for this game
+    const line = spreads.find((l: any) => String(l.id) === String(g.id));
+    let formattedSpread = '';
+    if (line && line.lines && line.lines.length > 0) {
+      let bestLine = line.lines.find((l: any) => l.provider === 'DraftKings')
+        || line.lines.find((l: any) => l.provider === 'ESPN BET')
+        || line.lines[0];
+      formattedSpread = bestLine.formattedSpread || '';
+    }
+    return {
+      ...g,
+      homeLogo,
+      awayLogo,
+      displayDate,
+      displayTime,
+      formattedSpread,
+    };
   });
 
+  async function saveSingleGameToWeek(game: any, add: boolean) {
+    setSaving(true);
+    setFeedback(null);
+    try {
+      // Find or create the week
+      const weekDesc = `Week ${week} ${year} ${seasonType}`;
+      let { data: existingWeeks } = (await (client.models.Week.list({
+        filter: { description: { eq: weekDesc } },
+      }) as any));
+      if (!weekObj && add) {
+      let weekObj = existingWeeks[0];
+        // Create week if adding and it doesn't exist
+        const picksCloseUtc = game.startDate ? new Date(new Date(game.startDate).getTime() - 30 * 60000) : new Date();
+        const newWeekResp = await (client.models.Week.create({
+          description: weekDesc,
+          picksOpenUtc: new Date().toISOString(),
+          picksCloseUtc: picksCloseUtc.toISOString(),
+          season: String(year),
+        }) as any);
+        weekObj = newWeekResp.data || newWeekResp;
+      }
+      if (!weekObj) {
+        setFeedback('No week found to remove game from.');
+        setSaving(false);
+        return;
+      }
+      // Find team IDs (normalized)
+      const homeTeam = teams.find(t => normalizeTeamName(t.name) === normalizeTeamName(game.homeTeam));
+      const awayTeam = teams.find(t => normalizeTeamName(t.name) === normalizeTeamName(game.awayTeam));
+      if (!homeTeam || !awayTeam) {
+        setFeedback('Missing team(s): ' + [game.homeTeam, game.awayTeam].join(', '));
+        setSaving(false);
+        return;
+      }
+      // Find spread info
+      const line = spreads.find((l: any) => String(l.id) === String(game.id));
+      let bestLine = line && line.lines && line.lines.length > 0 ?
+        (line.lines.find((l: any) => l.provider === 'DraftKings') ||
+         line.lines.find((l: any) => l.provider === 'ESPN BET') ||
+         line.lines[0]) : null;
+      let spread = bestLine && bestLine.formattedSpread ? Number(bestLine.formattedSpread.split(' ').pop()) : 0;
+      let spreadTeamName = bestLine && bestLine.formattedSpread ? bestLine.formattedSpread.replace(/\s*-?\d+(\.\d+)?$/, '').trim() : game.homeTeam;
+      const spreadTeam = teams.find(t => normalizeTeamName(t.name) === normalizeTeamName(spreadTeamName)) || homeTeam;
+      if (add) {
+        // Add game to week
+        await (client.models.Game.create({
+          weekId: weekObj.id,
+          homeTeamId: homeTeam.id,
+          awayTeamId: awayTeam.id,
+          spreadTeamId: spreadTeam.id,
+          spread,
+          winningTeamId: homeTeam.id,
+        }) as any);
+        setFeedback('Game added to week.');
+      } else {
+        // Remove game from week
+        const { data: weekGames } = (await (client.models.Game.list({
+          filter: { weekId: { eq: weekObj.id } },
+        }) as any));
+        const match = weekGames.find((g: any) =>
+          normalizeTeamName(g.homeTeam) === normalizeTeamName(game.homeTeam) &&
+          normalizeTeamName(g.awayTeam) === normalizeTeamName(game.awayTeam)
+        );
+        if (match) {
+          await (client.models.Game.delete({ id: match.id }) as any);
+          setFeedback('Game removed from week.');
+        } else {
+          setFeedback('Game not found in week.');
+        }
+      }
+    } catch (err: any) {
+      setFeedback(err.message || 'Error saving game.');
+      console.error('Save error:', err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleSelect(gameId: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      const add = !next.has(gameId);
+      if (add) next.add(gameId); else next.delete(gameId);
+      // Find the game object
+      const game = displayGames.find(g => g.id === gameId);
+      if (game) saveSingleGameToWeek(game, add);
+      return next;
+    });
+  }
+
+  // Helper to determine feedback color
+  function getFeedbackColor(msg: string | null) {
+    if (!msg) return undefined;
+    const lower = msg.toLowerCase();
+    if (lower.includes('success') || lower.includes('added') || lower.includes('removed')) return 'green';
+    return 'crimson';
+  }
+
+  // Calculate header height based on feedback
+  const headerHeight = feedback ? 260 : 220;
+
   return (
-    <main style={{ maxWidth: 1000, margin: "0 auto", padding: "2rem 1rem" }}>
+    <main style={{ maxWidth: 1000, margin: "0 auto", padding: "2rem 1rem", paddingTop: `${headerHeight}px` }}>
       <h1 style={{ textAlign: "center", color: "#222", fontWeight: 800, fontSize: "2rem", marginBottom: "2rem" }}>Select Games for Week</h1>
-      {loading ? (
-        <div style={{ textAlign: "center", color: "#888" }}>Loading games...</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {gamesWithLines.map((g: any) => (
-            <div key={g.id} style={{
-              display: 'flex', alignItems: 'center', gap: 24, background: '#fff', border: '1px solid #ddd', borderRadius: 8, padding: 12
+      {/* Filter Form - always visible */}
+      <form onSubmit={fetchData} style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        background: 'rgba(255,255,255,0.97)',
+        zIndex: 100,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        padding: '24px 0 20px 0',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.07)',
+        borderBottom: '1.5px solid #e3e8ee',
+        marginBottom: 0,
+        borderRadius: '0 0 18px 18px',
+        transition: 'box-shadow 0.2s',
+      }}>
+        {/* Feedback at the top for visibility */}
+        {feedback && <div style={{ marginBottom: 12, color: getFeedbackColor(feedback), fontWeight: 600, textAlign: 'center', width: '100%' }}>{feedback}</div>}
+        {/* Filter controls and Fetch Games button in one row */}
+        <div style={{ display: 'flex', gap: 24, justifyContent: 'center', flexWrap: 'wrap', width: '100%', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 110 }}>
+            <label style={{ fontWeight: 600, color: '#1976d2', marginBottom: 4 }}>Year</label>
+            <input type="number" value={year} onChange={e => setYear(Number(e.target.value))} min={2015} max={2100} style={{
+              width: 90,
+              padding: '7px 10px',
+              border: '1.5px solid #c3cfe2',
+              borderRadius: 7,
+              fontSize: '1rem',
+              outline: 'none',
+              background: '#f8fafc',
+              transition: 'border 0.2s',
+            }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 90 }}>
+            <label style={{ fontWeight: 600, color: '#1976d2', marginBottom: 4 }}>Week</label>
+            <input type="number" value={week} onChange={e => setWeek(Number(e.target.value))} min={1} max={20} style={{
+              width: 70,
+              padding: '7px 10px',
+              border: '1.5px solid #c3cfe2',
+              borderRadius: 7,
+              fontSize: '1rem',
+              outline: 'none',
+              background: '#f8fafc',
+              transition: 'border 0.2s',
+            }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 140 }}>
+            <label style={{ fontWeight: 600, color: '#1976d2', marginBottom: 4 }}>Season Type</label>
+            <select value={seasonType} onChange={e => setSeasonType(e.target.value)} style={{
+              width: 120,
+              padding: '7px 10px',
+              border: '1.5px solid #c3cfe2',
+              borderRadius: 7,
+              fontSize: '1rem',
+              background: '#f8fafc',
+              outline: 'none',
+              transition: 'border 0.2s',
             }}>
-              <input
-                type="checkbox"
-                checked={selected.has(g.id)}
-                onChange={() => toggleSelect(g.id)}
-                style={{ marginRight: 12 }}
-              />
-              <div style={{ minWidth: 220, display: 'flex', alignItems: 'center', gap: 8 }}>
-                {g.awayLogo && <img src={g.awayLogo} alt={g.awayTeam} style={{ width: 24, height: 24, objectFit: 'contain', borderRadius: 4 }} />}
-                <span>{g.awayTeam}</span>
-                <span style={{ color: '#888' }}>@</span>
-                {g.homeLogo && <img src={g.homeLogo} alt={g.homeTeam} style={{ width: 24, height: 24, objectFit: 'contain', borderRadius: 4 }} />}
-                <span>{g.homeTeam}</span>
-              </div>
-              <div style={{ minWidth: 120, color: '#1976d2', fontWeight: 700 }}>
-                {g.spreadTeam && g.spreadNumber ? `${g.spreadTeam} ${g.spreadNumber}` : 'No spread'}
-              </div>
-              <div style={{ minWidth: 180, color: '#555' }}>{g.displayDate} {g.displayTime}</div>
-            </div>
-          ))}
+              <option value="regular">Regular</option>
+              <option value="postseason">Postseason</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 140 }}>
+            <label style={{ fontWeight: 600, color: '#1976d2', marginBottom: 4 }}>Classification</label>
+            <select value={classification} onChange={e => setClassification(e.target.value)} style={{
+              width: 120,
+              padding: '7px 10px',
+              border: '1.5px solid #c3cfe2',
+              borderRadius: 7,
+              fontSize: '1rem',
+              background: '#f8fafc',
+              outline: 'none',
+              transition: 'border 0.2s',
+            }}>
+              <option value="fbs">FBS</option>
+              <option value="fcs">FCS</option>
+              <option value="ii">Division II</option>
+              <option value="iii">Division III</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            style={{ padding: '10px 28px', fontSize: '1.08rem', borderRadius: 8, background: '#f3f8fd', color: '#1976d2', border: '1.5px solid #1976d2', fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', height: 44, minWidth: 140, boxShadow: '0 2px 8px rgba(25,118,210,0.04)', alignSelf: 'flex-end' }}
+            disabled={saving}
+          >
+            Fetch Games
+          </button>
         </div>
-      )}
-      {/* Add a button for future submission */}
-      <div style={{ marginTop: 32, textAlign: 'center' }}>
-        <button style={{ padding: '0.75em 2em', fontSize: '1.1rem', borderRadius: 8, background: '#1976d2', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }} disabled={selected.size === 0}>
-          Add Selected Games to Week
-        </button>
+      </form>
+      {/* Games/results area always rendered */}
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 18, marginTop: 12 }}>
+        {displayGames.map((g) => (
+          <div key={g.id} style={{
+            display: 'flex',
+            flexDirection: 'column',
+            background: '#fff',
+            borderRadius: 12,
+            boxShadow: '0 2px 8px rgba(25,118,210,0.06)',
+            border: selected.has(g.id) ? '2px solid #1976d2' : '1.5px solid #e3e8ee',
+            padding: '18px 18px 12px 18px',
+            marginBottom: 0,
+            transition: 'border 0.2s',
+            position: 'relative',
+            minWidth: 0,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+                {/* Away team */}
+                {g.awayLogo && <img src={g.awayLogo} alt={g.awayTeam} style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />}
+                <span style={{ fontWeight: 600, fontSize: '1.08rem', color: '#444', minWidth: 80, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.awayTeam}</span>
+                <span style={{ color: '#bbb', fontSize: '1.2em', margin: '0 4px' }}>@</span>
+                {/* Home team */}
+                {g.homeLogo && <img src={g.homeLogo} alt={g.homeTeam} style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />}
+                <span style={{ fontWeight: 700, fontSize: '1.12rem', color: '#222', minWidth: 80, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.homeTeam}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ color: '#1976d2', fontWeight: 700, fontSize: '1.08rem', minWidth: 70, textAlign: 'center' }}>{g.formattedSpread || 'No spread'}</div>
+                <div style={{ color: '#555', fontSize: '1.02rem', minWidth: 120, textAlign: 'center', whiteSpace: 'nowrap' }}>{g.displayDate} {g.displayTime}</div>
+                <button
+                  onClick={() => toggleSelect(g.id)}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: 7,
+                    border: selected.has(g.id) ? '1.5px solid #b71c1c' : '1.5px solid #1976d2',
+                    background: selected.has(g.id) ? '#fff0f0' : '#f3f8fd',
+                    color: selected.has(g.id) ? '#b71c1c' : '#1976d2',
+                    fontWeight: 700,
+                    fontSize: '1.01rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.18s',
+                    minWidth: 120,
+                  }}
+                  disabled={saving}
+                >
+                  {selected.has(g.id) ? 'Remove from Week' : 'Add to Week'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {/* Loading overlay */}
+        {loading && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(255,255,255,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 200,
+            fontSize: '1.5rem',
+            color: '#1976d2',
+            fontWeight: 700
+          }}>
+            Loading games...
+          </div>
+        )}
       </div>
     </main>
   );

@@ -1,0 +1,73 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { Amplify } from "aws-amplify";
+import outputs from "@/amplify_outputs.json";
+import { generateClient } from 'aws-amplify/data';
+
+Amplify.configure(outputs);
+const client = generateClient();
+const CFBD_API_KEY = "9anqqpEw3ZvZGClSNpcAeO/THnMIDUVU3y/cd4n0FvmZru537vkEMFgffxCUw5eE"; // <-- Replace with your actual key
+
+async function deleteAllTeams() {
+  const { data: teams } = await client.models.Team.list();
+  for (const team of teams) {
+    await client.models.Team.delete({ id: team.id });
+  }
+}
+
+async function deleteAllConferences() {
+  const { data: conferences } = await client.models.Conference.list();
+  for (const conf of conferences) {
+    await client.models.Conference.delete({ id: conf.id });
+  }
+}
+
+async function importConferences() {
+  const res = await fetch("https://api.collegefootballdata.com/conferences", {
+    headers: { Authorization: `Bearer ${CFBD_API_KEY}` }
+  });
+  const conferences = await res.json();
+  for (const conf of conferences) {
+    await client.models.Conference.create({
+      name: conf.name,
+      imageUrl: "",
+      smallImageUrl: ""
+    });
+  }
+}
+
+async function importTeams() {
+  const res = await fetch("https://api.collegefootballdata.com/teams/fbs", {
+    headers: { Authorization: `Bearer ${CFBD_API_KEY}` }
+  });
+  const teams = await res.json();
+  const { data: localConfs } = await client.models.Conference.list();
+  let imported = 0;
+  let skipped = 0;
+  for (const team of teams) {
+    const conf = localConfs.find((c: any) => c.name === team.conference);
+    if (!conf) {
+      skipped++;
+      continue;
+    }
+    await client.models.Team.create({
+      name: team.school,
+      imageUrl: team.logos && team.logos.length > 0 ? team.logos[0] : "",
+      conferenceId: conf.id
+    });
+    imported++;
+  }
+  return { imported, skipped };
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await deleteAllTeams();
+    await deleteAllConferences();
+    await importConferences();
+    const { imported, skipped } = await importTeams();
+    return NextResponse.json({ success: true, imported, skipped });
+  } catch (err: any) {
+    console.error('API error:', err); // Log error details to server console
+    return NextResponse.json({ success: false, error: err.message || String(err) }, { status: 500 });
+  }
+}
