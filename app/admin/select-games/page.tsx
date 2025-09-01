@@ -1,30 +1,97 @@
 "use client";
 import React, { useState } from "react";
+import { useEffect } from "react";
+import { generateClient } from "aws-amplify/data";
+import type { Schema } from "@/amplify/data/resource";
+
+const client = generateClient<Schema>();
+
+function getDefaultSeasonYear() {
+  const now = new Date();
+  const month = now.getMonth() + 1; // getMonth() is 0-based
+  const year = now.getFullYear();
+  // College football season starts in August (8)
+  return month >= 8 ? year : year - 1;
+}
 
 export default function SelectGamesPage() {
   // Filter state
-  const [year, setYear] = useState<number>(2024);
+  const [year, setYear] = useState<number>(getDefaultSeasonYear());
   const [week, setWeek] = useState<number>(1);
   const [fetching, setFetching] = useState(false);
-  // Example game state (placeholder)
-  const [inDb, setInDb] = useState(false);
+  const [games, setGames] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  // Placeholder game data
-  const game = {
-    awayTeam: { name: "Alabama", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/333.png" },
-    homeTeam: { name: "Georgia", logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/61.png" },
-    spread: "Georgia -7.5",
-    start: "2024-09-07T19:30:00Z",
-  };
-
-  function handleFetch(e: React.FormEvent) {
+  // Fetch games, rankings, and teams, then filter
+  async function handleFetch(e: React.FormEvent) {
     e.preventDefault();
     setFetching(true);
-    setTimeout(() => setFetching(false), 1000); // Simulate fetch
-  }
+    setError(null);
+    try {
+      // 1. Fetch Top 25 Rankings
+      const rankingsRes = await fetch(
+        `https://api.collegefootballdata.com/rankings?year=${year}&seasonType=regular&week=${week}`,
+        { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
+      );
+      if (!rankingsRes.ok) throw new Error("Failed to fetch rankings");
+      const rankingsData = await rankingsRes.json();
+      // rankingsData is an array of polls, each with ranks. We'll flatten all top 25 schools.
+      const top25Schools = new Set<string>();
+      for (const poll of rankingsData) {
+        if (poll.poll === "AP Top 25" && poll.ranks) {
+          for (const rank of poll.ranks) {
+            if (rank.school) top25Schools.add(rank.school.toLowerCase());
+          }
+        }
+      }
 
-  function handleAddRemove() {
-    setInDb(v => !v);
+      // 2. Fetch Games
+      const gamesRes = await fetch(
+        `https://api.collegefootballdata.com/games?year=${year}&seasonType=regular&week=${week}&classification=fbs&team=Alabama`,
+        { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
+      );
+      if (!gamesRes.ok) throw new Error("Failed to fetch games");
+      const gamesData = await gamesRes.json();
+
+      // 3. Fetch Teams from DB
+      // @ts-expect-error
+      const teamsResult = await client.models.Team.list();
+      const dbTeams = teamsResult.data;
+      // Build a map for quick lookup (case-insensitive)
+      const dbTeamMap = new Map<string, any>();
+      dbTeams.forEach((team: any) => {
+        if (team.name) dbTeamMap.set(team.name.toLowerCase(), team);
+      });
+      // Log all team names in the DB in alphabetical order
+      const allDbTeamNames = dbTeams.map((team: any) => team.name).filter(Boolean).sort((a: string, b: string) => a.localeCompare(b));
+      // eslint-disable-next-line no-console
+      console.log('All team names in DB (alphabetical):', allDbTeamNames);
+
+      // 4. Filter Games
+      // For testing: only keep games where Alabama is the away team
+      const filteredGames = gamesData.filter((game: any) => {
+        // Log every game returned by the API
+        // eslint-disable-next-line no-console
+        console.log('API Game:', game);
+        const awayName = game.awayTeam?.toLowerCase();
+        if (awayName !== 'alabama') return false;
+        const alabamaDb = dbTeamMap.get('alabama');
+        if (alabamaDb) {
+          // eslint-disable-next-line no-console
+          console.log('Alabama from DB:', alabamaDb);
+        } else {
+          // eslint-disable-next-line no-console
+          console.log('Alabama not found in DB');
+        }
+        return true;
+      });
+      setGames(filteredGames);
+    } catch (err: any) {
+      setError(err.message || "Unknown error");
+      setGames([]);
+    } finally {
+      setFetching(false);
+    }
   }
 
   return (
@@ -60,48 +127,36 @@ export default function SelectGamesPage() {
           </button>
         </form>
       </div>
-      {/* Example game card */}
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px rgba(25,118,210,0.06)', border: inDb ? '2px solid #1976d2' : '1.5px solid #e3e8ee', padding: '20px 16px', marginBottom: 0, minWidth: 0, width: '100%', maxWidth: 500, margin: '0 auto',
+      {/* Error message */}
+      {error && <div style={{ color: '#b71c1c', marginBottom: 16, fontWeight: 600 }}>{error}</div>}
+      {/* Games list */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, justifyContent: 'center' }}>
+        {games.length === 0 && !fetching && !error && (
+          <div style={{ color: '#888', fontSize: '1.1rem', marginTop: 32 }}>No games found for the selected week.</div>
+        )}
+        {games.map((game, idx) => (
+          <div key={idx} style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px rgba(25,118,210,0.06)', border: '1.5px solid #e3e8ee', padding: '20px 16px', marginBottom: 0, minWidth: 0, width: '100%', maxWidth: 500, margin: '0 auto',
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0, width: '100%' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <img src={game.awayTeam.logo} alt={game.awayTeam.name} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
-            <span style={{ fontWeight: 600, fontSize: '1.08rem', color: '#444' }}>{game.awayTeam.name}</span>
+                <span style={{ fontWeight: 600, fontSize: '1.08rem', color: '#444' }}>{game.awayTeam}</span>
           </div>
           <span style={{ color: '#bbb', fontSize: '1.2em', margin: '2px 0' }}>@</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <img src={game.homeTeam.logo} alt={game.homeTeam.name} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
-            <span style={{ fontWeight: 700, fontSize: '1.12rem', color: '#222' }}>{game.homeTeam.name}</span>
+                <span style={{ fontWeight: 700, fontSize: '1.12rem', color: '#222' }}>{game.home_team}</span>
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 4, marginTop: 12 }}>
           <div style={{ color: '#1976d2', fontWeight: 700, fontSize: '0.98rem', minWidth: 80, textAlign: 'center', lineHeight: 1.2 }}>
-            {game.spread}
+                {game.home_points != null && game.away_points != null ? `${game.home_points} - ${game.away_points}` : 'No score yet'}
           </div>
           <div style={{ color: '#555', fontSize: '1.02rem', textAlign: 'center' }}>
-            {new Date(game.start).toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
+                {game.start_date ? new Date(game.start_date).toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : ''}
+              </div>
+            </div>
           </div>
-        </div>
-        <button
-          onClick={handleAddRemove}
-          style={{
-            marginTop: 18,
-            padding: '12px 32px',
-            borderRadius: 7,
-            border: inDb ? '1.5px solid #b71c1c' : '1.5px solid #1976d2',
-            background: inDb ? '#fff0f0' : '#f3f8fd',
-            color: inDb ? '#b71c1c' : '#1976d2',
-            fontWeight: 700,
-            fontSize: '1.08rem',
-            cursor: 'pointer',
-            transition: 'all 0.18s',
-            width: '100%',
-            maxWidth: 220,
-          }}
-        >
-          {inDb ? 'Remove' : 'Add'}
-        </button>
+        ))}
       </div>
     </main>
   );
