@@ -10,7 +10,6 @@ const client = generateClient<Schema>();
 const CFBD_API_KEY = "9anqqpEw3ZvZGClSNpcAeO/THnMIDUVU3y/cd4n0FvmZru537vkEMFgffxCUw5eE"; // <-- Replace with your actual key
 
 async function deleteAllTeams() {
-  // @ts-expect-error
   const teamResult = await client.models.Team.list();
   const { data: teams } = teamResult;
   for (const team of teams) {
