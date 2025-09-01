@@ -14,6 +14,30 @@ function getDefaultSeasonYear() {
   return month >= 8 ? year : year - 1;
 }
 
+// Move these helper functions to the top-level scope
+async function fetchAllTeams(client: any) {
+  let nextToken = undefined;
+  let allTeams: any[] = [];
+  do {
+    // @ts-expect-error
+    const result = await client.models.Team.list({ nextToken });
+    allTeams = allTeams.concat(result.data);
+    nextToken = result.nextToken;
+  } while (nextToken);
+  return allTeams;
+}
+async function fetchAllConferences(client: any) {
+  let nextToken = undefined;
+  let allConfs: any[] = [];
+  do {
+    // @ts-expect-error
+    const result = await client.models.Conference.list({ nextToken });
+    allConfs = allConfs.concat(result.data);
+    nextToken = result.nextToken;
+  } while (nextToken);
+  return allConfs;
+}
+
 export default function SelectGamesPage() {
   // Filter state
   const [year, setYear] = useState<number>(getDefaultSeasonYear());
@@ -35,56 +59,92 @@ export default function SelectGamesPage() {
       );
       if (!rankingsRes.ok) throw new Error("Failed to fetch rankings");
       const rankingsData = await rankingsRes.json();
-      // rankingsData is an array of polls, each with ranks. We'll flatten all top 25 schools.
+      // eslint-disable-next-line no-console
+      console.log('rankingsData:', rankingsData);
+      // rankingsData is an array with a single object containing 'polls'
       const top25Schools = new Set<string>();
-      for (const poll of rankingsData) {
-        if (poll.poll === "AP Top 25" && poll.ranks) {
-          for (const rank of poll.ranks) {
-            if (rank.school) top25Schools.add(rank.school.toLowerCase());
-          }
+      const polls = rankingsData[0]?.polls;
+      const apPoll = polls?.find((p: any) => p.poll === "AP Top 25");
+      if (apPoll && apPoll.ranks) {
+        for (const rank of apPoll.ranks) {
+          if (rank.school) top25Schools.add(rank.school.trim().toLowerCase());
         }
       }
 
       // 2. Fetch Games
       const gamesRes = await fetch(
-        `https://api.collegefootballdata.com/games?year=${year}&seasonType=regular&week=${week}&classification=fbs&team=Alabama`,
+        `https://api.collegefootballdata.com/games?year=${year}&seasonType=regular&week=${week}&classification=fbs`,
         { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
       );
       if (!gamesRes.ok) throw new Error("Failed to fetch games");
       const gamesData = await gamesRes.json();
 
-      // 3. Fetch Teams from DB
-      // @ts-expect-error
-      const teamsResult = await client.models.Team.list();
-      const dbTeams = teamsResult.data;
+      // 2b. Fetch Lines (spreads)
+      const linesRes = await fetch(
+        `https://api.collegefootballdata.com/lines?year=${year}&seasonType=regular&week=${week}`,
+        { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
+      );
+      if (!linesRes.ok) throw new Error("Failed to fetch lines");
+      const linesData = await linesRes.json();
+      // Build a map of gameId to first line object
+      const linesMap = new Map();
+      for (const line of linesData) {
+        if (line.id && Array.isArray(line.lines) && line.lines.length > 0) {
+          linesMap.set(line.id, line.lines[0]);
+        }
+      }
+      // eslint-disable-next-line no-console
+      // console.log('All games fetched from API:', gamesData);
+
+      // 3. Fetch Teams and Conferences from DB
+      const [dbTeams, dbConfs] = await Promise.all([
+        fetchAllTeams(client),
+        fetchAllConferences(client),
+      ]);
       // Build a map for quick lookup (case-insensitive)
       const dbTeamMap = new Map<string, any>();
+      const confMap = Object.fromEntries(dbConfs.map((c: any) => [c.id, c]));
       dbTeams.forEach((team: any) => {
-        if (team.name) dbTeamMap.set(team.name.toLowerCase(), team);
+        if (team.name) {
+          dbTeamMap.set(team.name.trim().toLowerCase(), {
+            ...team,
+            conference: confMap[team.conferenceId],
+          });
+        }
       });
-      // Log all team names in the DB in alphabetical order
-      const allDbTeamNames = dbTeams.map((team: any) => team.name).filter(Boolean).sort((a: string, b: string) => a.localeCompare(b));
-      // eslint-disable-next-line no-console
-      console.log('All team names in DB (alphabetical):', allDbTeamNames);
 
       // 4. Filter Games
-      // For testing: only keep games where Alabama is the away team
       const filteredGames = gamesData.filter((game: any) => {
-        // Log every game returned by the API
-        // eslint-disable-next-line no-console
-        console.log('API Game:', game);
-        const awayName = game.awayTeam?.toLowerCase();
-        if (awayName !== 'alabama') return false;
-        const alabamaDb = dbTeamMap.get('alabama');
-        if (alabamaDb) {
+        const homeName = game.homeTeam?.trim().toLowerCase();
+        const awayName = game.awayTeam?.trim().toLowerCase();
+        const homeDb = dbTeamMap.get(homeName);
+        const awayDb = dbTeamMap.get(awayName);
+        if (homeName === 'tennessee' || awayName === 'tennessee') {
           // eslint-disable-next-line no-console
-          console.log('Alabama from DB:', alabamaDb);
-        } else {
+          console.log('top25Schools:', Array.from(top25Schools));
           // eslint-disable-next-line no-console
-          console.log('Alabama not found in DB');
+          console.log('homeDb.conference.name:', homeDb?.conference?.name, 'awayDb.conference.name:', awayDb?.conference?.name);
         }
-        return true;
-      });
+        if (!homeDb || !awayDb) return false;
+        const isTop25 = top25Schools.has(homeName) || top25Schools.has(awayName);
+        const isSEC = homeDb.conference.name === "SEC" || awayDb.conference.name === "SEC";
+        const isUAB = homeDb.name === "UAB" || awayDb.name === "UAB";
+        return isTop25 || isSEC || isUAB;
+      }).map((game: any) => {
+        // Attach the first line's formattedSpread if available
+        const line = linesMap.get(game.id);
+        const awayDb = dbTeamMap.get(game.awayTeam?.trim().toLowerCase());
+        const homeDb = dbTeamMap.get(game.homeTeam?.trim().toLowerCase());
+        return {
+          ...game,
+          formattedSpread: line?.formattedSpread || null,
+          awayImage: awayDb?.imageUrl || null,
+          homeImage: homeDb?.imageUrl || null,
+        };
+      }).filter((game: any) => game.formattedSpread != null);
+      // Log filtered games before updating state
+      // eslint-disable-next-line no-console
+      console.log('Filtered games:', filteredGames);
       setGames(filteredGames);
     } catch (err: any) {
       setError(err.message || "Unknown error");
@@ -137,22 +197,28 @@ export default function SelectGamesPage() {
         {games.map((game, idx) => (
           <div key={idx} style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px rgba(25,118,210,0.06)', border: '1.5px solid #e3e8ee', padding: '20px 16px', marginBottom: 0, minWidth: 0, width: '100%', maxWidth: 500, margin: '0 auto',
-      }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0, width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0, width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {game.awayImage ? (
+                  <img src={game.awayImage} alt={game.awayTeam} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
+                ) : null}
                 <span style={{ fontWeight: 600, fontSize: '1.08rem', color: '#444' }}>{game.awayTeam}</span>
-          </div>
-          <span style={{ color: '#bbb', fontSize: '1.2em', margin: '2px 0' }}>@</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 700, fontSize: '1.12rem', color: '#222' }}>{game.home_team}</span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 4, marginTop: 12 }}>
-          <div style={{ color: '#1976d2', fontWeight: 700, fontSize: '0.98rem', minWidth: 80, textAlign: 'center', lineHeight: 1.2 }}>
-                {game.home_points != null && game.away_points != null ? `${game.home_points} - ${game.away_points}` : 'No score yet'}
-          </div>
-          <div style={{ color: '#555', fontSize: '1.02rem', textAlign: 'center' }}>
-                {game.start_date ? new Date(game.start_date).toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : ''}
+              </div>
+              <span style={{ color: '#bbb', fontSize: '1.2em', margin: '2px 0' }}>@</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {game.homeImage ? (
+                  <img src={game.homeImage} alt={game.homeTeam} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
+                ) : null}
+                <span style={{ fontWeight: 700, fontSize: '1.12rem', color: '#222' }}>{game.homeTeam}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 4, marginTop: 12 }}>
+              <div style={{ color: '#1976d2', fontWeight: 700, fontSize: '0.98rem', minWidth: 80, textAlign: 'center', lineHeight: 1.2 }}>
+                {game.formattedSpread != null ? game.formattedSpread : 'No spread'}
+              </div>
+              <div style={{ color: '#555', fontSize: '1.02rem', textAlign: 'center' }}>
+                {game.startDate ? new Date(game.startDate).toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : ''}
               </div>
             </div>
           </div>
