@@ -2,21 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Amplify } from "aws-amplify";
 import outputs from "@/amplify_outputs.json";
 import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '@/amplify/data/resource';
 
 Amplify.configure(outputs);
-const client = generateClient();
+const client = generateClient<Schema>();
 
 const CFBD_API_KEY = "9anqqpEw3ZvZGClSNpcAeO/THnMIDUVU3y/cd4n0FvmZru537vkEMFgffxCUw5eE"; // <-- Replace with your actual key
 
 async function deleteAllTeams() {
-  const { data: teams } = await client.models.Team.list();
+  // @ts-expect-error
+  const teamResult = await client.models.Team.list();
+  const { data: teams } = teamResult;
   for (const team of teams) {
     await client.models.Team.delete({ id: team.id });
   }
 }
 
 async function deleteAllConferences() {
-  const { data: conferences } = await client.models.Conference.list();
+  // @ts-expect-error
+  const conferenceResult = await client.models.Conference.list();
+  const { data: conferences } = conferenceResult;
   for (const conf of conferences) {
     await client.models.Conference.delete({ id: conf.id });
   }
