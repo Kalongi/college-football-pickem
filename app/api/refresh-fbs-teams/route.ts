@@ -5,6 +5,7 @@ import { generateClient } from 'aws-amplify/data';
 
 Amplify.configure(outputs);
 const client = generateClient();
+
 const CFBD_API_KEY = "9anqqpEw3ZvZGClSNpcAeO/THnMIDUVU3y/cd4n0FvmZru537vkEMFgffxCUw5eE"; // <-- Replace with your actual key
 
 async function deleteAllTeams() {
@@ -61,13 +62,29 @@ async function importTeams() {
 
 export async function POST(req: NextRequest) {
   try {
-    await deleteAllTeams();
-    await deleteAllConferences();
-    await importConferences();
-    const { imported, skipped } = await importTeams();
-    return NextResponse.json({ success: true, imported, skipped });
+    const { step } = await req.json();
+    if (!step) {
+      return NextResponse.json({ success: false, error: 'No step provided.' }, { status: 400 });
+    }
+    if (step === 'deleteTeams') {
+      await deleteAllTeams();
+      return NextResponse.json({ success: true, step: 'deleteTeams' });
+    }
+    if (step === 'deleteConferences') {
+      await deleteAllConferences();
+      return NextResponse.json({ success: true, step: 'deleteConferences' });
+    }
+    if (step === 'importConferences') {
+      await importConferences();
+      return NextResponse.json({ success: true, step: 'importConferences' });
+    }
+    if (step === 'importTeams') {
+      const { imported, skipped } = await importTeams();
+      return NextResponse.json({ success: true, step: 'importTeams', imported, skipped });
+    }
+    return NextResponse.json({ success: false, error: 'Unknown step.' }, { status: 400 });
   } catch (err: any) {
-    console.error('API error:', err); // Log error details to server console
+    console.error('API error:', err);
     return NextResponse.json({ success: false, error: err.message || String(err) }, { status: 500 });
   }
 }

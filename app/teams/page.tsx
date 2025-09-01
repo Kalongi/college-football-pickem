@@ -39,7 +39,7 @@ export default function TeamsPage() {
   }, []);
 
   return (
-    <main style={{ maxWidth: 1200, margin: "0 auto", padding: "2rem 1rem" }}>
+    <main style={{ maxWidth: 1200, margin: "0 auto", padding: "2rem 1rem", paddingTop: '72px' }}>
       <h1 style={{ textAlign: "center", color: "#222", fontWeight: 800, fontSize: "2.5rem", marginBottom: "2rem" }}>NCAA FBS Teams</h1>
       {loading ? (
         <div style={{ textAlign: "center", color: "#888" }}>Loading teams...</div>

@@ -36,6 +36,7 @@ export default function App() {
       flexDirection: 'column',
       gap: '2rem',
       alignItems: 'stretch',
+      paddingTop: '72px',
     }}>
       <section style={{
         background: '#fff',

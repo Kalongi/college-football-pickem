@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./app.css";
+import Nav from "./nav-client";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -16,29 +17,19 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <style>{`
+          @media (max-width: 700px) {
+            .main-nav { padding: 0.5rem 0.5rem !important; }
+          }
+          @media (min-width: 701px) {
+            .main-nav { padding: 1rem 0 !important; }
+          }
+        `}</style>
+      </head>
       <body className={inter.className} style={{ margin: 0, background: '#f7f7f9', minHeight: '100vh' }}>
-        <nav style={{
-          width: '100vw',
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          zIndex: 100,
-          background: '#222',
-          color: 'white',
-          padding: '1rem 0',
-          boxShadow: '0 2px 8px rgba(34,34,34,0.08)',
-          display: 'flex',
-          justifyContent: 'center',
-        }}>
-          <div style={{ display: 'flex', gap: '2rem', alignItems: 'center', fontWeight: 700, fontSize: '1.2rem' }}>
-            <a href="/" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>Home</a>
-            <a href="/mypicks" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>My Picks</a>
-            <a href="/teams" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>Teams</a>
-            <a href="/admin/select-games" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>Select Games</a>
-            <a href="/about" style={{ color: '#fff', textDecoration: 'none', padding: '0.25rem 0.75rem', borderRadius: 6, transition: 'background 0.2s', background: 'none' }}>About</a>
-          </div>
-        </nav>
-        <div style={{ paddingTop: '4.5rem', minHeight: '100vh' }}>{children}</div>
+        <Nav />
+        <div style={{ paddingTop: '72px', minHeight: '100vh', width: '100%', maxWidth: 1000, margin: '0 auto' }}>{children}</div>
       </body>
     </html>
   );
