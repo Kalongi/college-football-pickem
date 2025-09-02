@@ -5,9 +5,16 @@ import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
 import type { SelectGamesListGame } from '@/types/game';
 import { filterAndEnrichGames } from '@/lib/gameService';
+import { client as cfbdClient, getGames, getLines, getRankings } from 'cfbd';
 
 Amplify.configure(outputs);
 const client = generateClient<Schema>();
+
+cfbdClient.setConfig({
+  headers: {
+    'Authorization': `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}`,
+  }
+});
 
 async function fetchAllTeams(client: any) {
   let nextToken = undefined;
@@ -53,29 +60,36 @@ export async function GET(request: NextRequest) {
     if (!year || !week) {
       return NextResponse.json({ error: 'Missing year or week parameter' }, { status: 400 });
     }
-    // Fetch games from external API
-    const apiRes = await fetch(
-      `https://api.collegefootballdata.com/games?year=${year}&seasonType=${seasonType}&week=${week}&classification=fbs`,
-      { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
-    );
-    if (!apiRes.ok) throw new Error('Failed to fetch games from external API');
-    const apiGames = await apiRes.json();
+    // Fetch games from external API using cfbd
+    const gamesResp = await getGames({
+      query: {
+        year: Number(year),
+        seasonType: seasonType as any, // fix type error
+        week: Number(week),
+        classification: 'fbs',
+      }
+    });
+    const apiGames = gamesResp.data ?? [];
 
-    // Fetch lines (spreads)
-    const linesRes = await fetch(
-      `https://api.collegefootballdata.com/lines?year=${year}&seasonType=${seasonType}&week=${week}`,
-      { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
-    );
-    if (!linesRes.ok) throw new Error('Failed to fetch lines');
-    const linesData = await linesRes.json();
+    // Fetch lines (spreads) using cfbd
+    const linesResp = await getLines({
+      query: {
+        year: Number(year),
+        seasonType: seasonType as any, // fix type error
+        week: Number(week),
+      }
+    });
+    const linesData = linesResp.data ?? [];
 
-    // Fetch rankings (Top 25)
-    const rankingsRes = await fetch(
-      `https://api.collegefootballdata.com/rankings?year=${year}&seasonType=${seasonType}&week=${week}`,
-      { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
-    );
-    if (!rankingsRes.ok) throw new Error('Failed to fetch rankings');
-    const rankingsData = await rankingsRes.json();
+    // Fetch rankings (Top 25) using cfbd
+    const rankingsResp = await getRankings({
+      query: {
+        year: Number(year),
+        seasonType: seasonType as any, // fix type error
+        week: Number(week),
+      }
+    });
+    const rankingsData = rankingsResp.data ?? [];
 
     // Fetch all teams, conferences, and DB games for the week
     const [dbTeams, dbConfs, dbGames] = await Promise.all([

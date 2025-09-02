@@ -1,4 +1,5 @@
 import type { SelectGamesListGame, Team } from '@/types/game';
+import type { Game, BettingGame, PollWeek } from 'cfbd';
 
 export function parseFormattedSpread(formattedSpread: string, dbTeams: Team[]): { spreadTeamId: string, spread: number } | null {
   // Try to parse formattedSpread, e.g. "Alabama -7.5"
@@ -36,11 +37,11 @@ export function filterAndEnrichGames({
   rankingsData,
   dbGames
 }: {
-  apiGames: any[];
+  apiGames: Game[];
   dbTeams: Team[];
   dbConfs: any[];
-  linesData: any[];
-  rankingsData: any[];
+  linesData: BettingGame[];
+  rankingsData: PollWeek[];
   dbGames: any[];
 }): SelectGamesListGame[] {
   // Build lookup maps
