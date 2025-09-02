@@ -72,7 +72,7 @@ export default function SelectGamesPage() {
       {/* Error message */}
       {error && <div style={{ color: '#b71c1c', marginBottom: 16, fontWeight: 600 }}>{error}</div>}
       {/* Games list */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, justifyContent: 'center' }}>
+      <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', gap: 24, justifyContent: 'center', minHeight: 200 }}>
         {games.length === 0 && !fetching && !error && (
           <div style={{ color: '#888', fontSize: '1.1rem', marginTop: 32 }}>No games found for the selected week.</div>
         )}
@@ -122,6 +122,33 @@ export default function SelectGamesPage() {
             </div>
           </div>
         ))}
+        {/* Loading overlay */}
+        {fetching && (
+          <div style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(255,255,255,0.8)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            zIndex: 10,
+            opacity: 1,
+            transition: 'opacity 0.3s',
+          }}>
+            <div style={{
+              width: 48, height: 48,
+              border: '5px solid #e0e0e0',
+              borderTop: '5px solid #1976d2',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              marginBottom: 16,
+            }} />
+            <div style={{ fontSize: '1.2rem', color: '#1976d2', fontWeight: 500 }}>Loading games…</div>
+            <style>{`
+              @keyframes spin {
+                to { transform: rotate(360deg); }
+              }
+            `}</style>
+          </div>
+        )}
       </div>
     </main>
   );

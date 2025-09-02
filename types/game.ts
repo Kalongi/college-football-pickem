@@ -2,7 +2,7 @@ export interface Team {
   id: string;
   name: string;
   imageUrl?: string;
-  conferenceId?: string;
+  conferenceId: string;
 }
 
 export interface Game {
@@ -40,4 +40,10 @@ export interface SelectGamesListGame {
   } | null;
   inDb: boolean;
   dbGameId?: string;
+}
+
+export interface Conference {
+  id: string;
+  name: string;
+  // Add other properties as needed
 }

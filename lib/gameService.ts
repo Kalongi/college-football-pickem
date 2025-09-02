@@ -1,5 +1,5 @@
-import type { SelectGamesListGame, Team } from '@/types/game';
-import type { Game, BettingGame, PollWeek } from 'cfbd';
+import type { SelectGamesListGame, Team, Conference, Game as DbGame } from '@/types/game';
+import type { Game as ApiGame, BettingGame, PollWeek } from 'cfbd';
 
 export function parseFormattedSpread(formattedSpread: string, dbTeams: Team[]): { spreadTeamId: string, spread: number } | null {
   // Try to parse formattedSpread, e.g. "Alabama -7.5"
@@ -37,17 +37,17 @@ export function filterAndEnrichGames({
   rankingsData,
   dbGames
 }: {
-  apiGames: Game[];
+  apiGames: ApiGame[];
   dbTeams: Team[];
-  dbConfs: any[];
+  dbConfs: Conference[];
   linesData: BettingGame[];
   rankingsData: PollWeek[];
-  dbGames: any[];
+  dbGames: DbGame[];
 }): SelectGamesListGame[] {
   // Build lookup maps
   const dbTeamMap = new Map<string, any>();
-  const confMap = Object.fromEntries(dbConfs.map((c: any) => [c.id, c]));
-  dbTeams.forEach((team: any) => {
+  const confMap = Object.fromEntries(dbConfs.map((c: Conference) => [c.id, c]));
+  dbTeams.forEach((team: Team) => {
     if (team.name) {
       dbTeamMap.set(team.name.trim().toLowerCase(), {
         ...team,
