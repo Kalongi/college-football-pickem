@@ -19,7 +19,7 @@ export default function TeamsPage() {
       let nextToken = undefined;
       let allTeams: any[] = [];
       do {
-        // @ts-expect-error
+        // @ts-expect-error Amplify Data client type is too complex for TS
         const result = await client.models.Team.list({ nextToken });
         allTeams = allTeams.concat(result.data);
         nextToken = result.nextToken;
@@ -30,7 +30,7 @@ export default function TeamsPage() {
       let nextToken = undefined;
       let allConfs: any[] = [];
       do {
-        // @ts-expect-error
+        // @ts-expect-error Amplify Data client type is too complex for TS
         const result = await client.models.Conference.list({ nextToken });
         allConfs = allConfs.concat(result.data);
         nextToken = result.nextToken;

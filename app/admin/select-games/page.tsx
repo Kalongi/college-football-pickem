@@ -1,10 +1,6 @@
 "use client";
 import React, { useState } from "react";
-import { useEffect } from "react";
-import { generateClient } from "aws-amplify/data";
-import type { Schema } from "@/amplify/data/resource";
-
-const client = generateClient<Schema>();
+import type { SelectGamesListGame } from '@/types/game';
 
 function getDefaultSeasonYear() {
   const now = new Date();
@@ -14,138 +10,24 @@ function getDefaultSeasonYear() {
   return month >= 8 ? year : year - 1;
 }
 
-// Move these helper functions to the top-level scope
-async function fetchAllTeams(client: any) {
-  let nextToken = undefined;
-  let allTeams: any[] = [];
-  do {
-    // @ts-expect-error
-    const result = await client.models.Team.list({ nextToken });
-    allTeams = allTeams.concat(result.data);
-    nextToken = result.nextToken;
-  } while (nextToken);
-  return allTeams;
-}
-async function fetchAllConferences(client: any) {
-  let nextToken = undefined;
-  let allConfs: any[] = [];
-  do {
-    // @ts-expect-error
-    const result = await client.models.Conference.list({ nextToken });
-    allConfs = allConfs.concat(result.data);
-    nextToken = result.nextToken;
-  } while (nextToken);
-  return allConfs;
-}
-
 export default function SelectGamesPage() {
   // Filter state
   const [year, setYear] = useState<number>(getDefaultSeasonYear());
   const [week, setWeek] = useState<number>(1);
   const [fetching, setFetching] = useState(false);
-  const [games, setGames] = useState<any[]>([]);
+  const [games, setGames] = useState<SelectGamesListGame[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch games, rankings, and teams, then filter
+  // Fetch games from the new API
   async function handleFetch(e: React.FormEvent) {
     e.preventDefault();
     setFetching(true);
     setError(null);
     try {
-      // 1. Fetch Top 25 Rankings
-      const rankingsRes = await fetch(
-        `https://api.collegefootballdata.com/rankings?year=${year}&seasonType=regular&week=${week}`,
-        { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
-      );
-      if (!rankingsRes.ok) throw new Error("Failed to fetch rankings");
-      const rankingsData = await rankingsRes.json();
-      // eslint-disable-next-line no-console
-      console.log('rankingsData:', rankingsData);
-      // rankingsData is an array with a single object containing 'polls'
-      const top25Schools = new Set<string>();
-      const polls = rankingsData[0]?.polls;
-      const apPoll = polls?.find((p: any) => p.poll === "AP Top 25");
-      if (apPoll && apPoll.ranks) {
-        for (const rank of apPoll.ranks) {
-          if (rank.school) top25Schools.add(rank.school.trim().toLowerCase());
-        }
-      }
-
-      // 2. Fetch Games
-      const gamesRes = await fetch(
-        `https://api.collegefootballdata.com/games?year=${year}&seasonType=regular&week=${week}&classification=fbs`,
-        { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
-      );
-      if (!gamesRes.ok) throw new Error("Failed to fetch games");
-      const gamesData = await gamesRes.json();
-
-      // 2b. Fetch Lines (spreads)
-      const linesRes = await fetch(
-        `https://api.collegefootballdata.com/lines?year=${year}&seasonType=regular&week=${week}`,
-        { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CFBD_API_KEY}` } }
-      );
-      if (!linesRes.ok) throw new Error("Failed to fetch lines");
-      const linesData = await linesRes.json();
-      // Build a map of gameId to first line object
-      const linesMap = new Map();
-      for (const line of linesData) {
-        if (line.id && Array.isArray(line.lines) && line.lines.length > 0) {
-          linesMap.set(line.id, line.lines[0]);
-        }
-      }
-      // eslint-disable-next-line no-console
-      // console.log('All games fetched from API:', gamesData);
-
-      // 3. Fetch Teams and Conferences from DB
-      const [dbTeams, dbConfs] = await Promise.all([
-        fetchAllTeams(client),
-        fetchAllConferences(client),
-      ]);
-      // Build a map for quick lookup (case-insensitive)
-      const dbTeamMap = new Map<string, any>();
-      const confMap = Object.fromEntries(dbConfs.map((c: any) => [c.id, c]));
-      dbTeams.forEach((team: any) => {
-        if (team.name) {
-          dbTeamMap.set(team.name.trim().toLowerCase(), {
-            ...team,
-            conference: confMap[team.conferenceId],
-          });
-        }
-      });
-
-      // 4. Filter Games
-      const filteredGames = gamesData.filter((game: any) => {
-        const homeName = game.homeTeam?.trim().toLowerCase();
-        const awayName = game.awayTeam?.trim().toLowerCase();
-        const homeDb = dbTeamMap.get(homeName);
-        const awayDb = dbTeamMap.get(awayName);
-        if (homeName === 'tennessee' || awayName === 'tennessee') {
-          // eslint-disable-next-line no-console
-          console.log('top25Schools:', Array.from(top25Schools));
-          // eslint-disable-next-line no-console
-          console.log('homeDb.conference.name:', homeDb?.conference?.name, 'awayDb.conference.name:', awayDb?.conference?.name);
-        }
-        if (!homeDb || !awayDb) return false;
-        const isTop25 = top25Schools.has(homeName) || top25Schools.has(awayName);
-        const isSEC = homeDb.conference.name === "SEC" || awayDb.conference.name === "SEC";
-        const isUAB = homeDb.name === "UAB" || awayDb.name === "UAB";
-        return isTop25 || isSEC || isUAB;
-      }).map((game: any) => {
-        // Attach the first line's formattedSpread if available
-        const line = linesMap.get(game.id);
-        const awayDb = dbTeamMap.get(game.awayTeam?.trim().toLowerCase());
-        const homeDb = dbTeamMap.get(game.homeTeam?.trim().toLowerCase());
-        return {
-          ...game,
-          formattedSpread: line?.formattedSpread || null,
-          awayImage: awayDb?.imageUrl || null,
-          homeImage: homeDb?.imageUrl || null,
-        };
-      }).filter((game: any) => game.formattedSpread != null);
-      // Log filtered games before updating state
-      // eslint-disable-next-line no-console
-      console.log('Filtered games:', filteredGames);
-      setGames(filteredGames);
+      const res = await fetch(`/api/admin/games/list?year=${year}&week=${week}&seasonType=regular`);
+      if (!res.ok) throw new Error("Failed to fetch games");
+      const data: { games: SelectGamesListGame[] } = await res.json();
+      setGames(data.games);
     } catch (err: any) {
       setError(err.message || "Unknown error");
       setGames([]);
@@ -200,26 +82,43 @@ export default function SelectGamesPage() {
           }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0, width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {game.awayImage ? (
-                  <img src={game.awayImage} alt={game.awayTeam} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
+                {game.awayTeam.imageUrl ? (
+                  <img src={game.awayTeam.imageUrl} alt={game.awayTeam.name} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
                 ) : null}
-                <span style={{ fontWeight: 600, fontSize: '1.08rem', color: '#444' }}>{game.awayTeam}</span>
+                <span style={{ fontWeight: 600, fontSize: '1.08rem', color: '#444' }}>{game.awayTeam.name}</span>
               </div>
               <span style={{ color: '#bbb', fontSize: '1.2em', margin: '2px 0' }}>@</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {game.homeImage ? (
-                  <img src={game.homeImage} alt={game.homeTeam} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
+                {game.homeTeam.imageUrl ? (
+                  <img src={game.homeTeam.imageUrl} alt={game.homeTeam.name} style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6, background: '#f3f8fd', border: '1px solid #e3e8ee' }} />
                 ) : null}
-                <span style={{ fontWeight: 700, fontSize: '1.12rem', color: '#222' }}>{game.homeTeam}</span>
+                <span style={{ fontWeight: 700, fontSize: '1.12rem', color: '#222' }}>{game.homeTeam.name}</span>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 4, marginTop: 12 }}>
               <div style={{ color: '#1976d2', fontWeight: 700, fontSize: '0.98rem', minWidth: 80, textAlign: 'center', lineHeight: 1.2 }}>
-                {game.formattedSpread != null ? game.formattedSpread : 'No spread'}
+                {game.spread ? game.spread.formatted : 'No spread'}
               </div>
               <div style={{ color: '#555', fontSize: '1.02rem', textAlign: 'center' }}>
                 {game.startDate ? new Date(game.startDate).toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : ''}
               </div>
+            </div>
+            <div style={{ marginTop: 16, width: '100%' }}>
+              {game.inDb ? (
+                <button
+                  style={{ width: '100%', display: 'block', background: '#b71c1c', color: '#fff', border: 'none', borderRadius: 6, padding: '12px 0', fontWeight: 700, cursor: 'pointer', fontSize: '1.08rem', marginTop: 8 }}
+                  onClick={() => {/* TODO: Remove game logic */}}
+                >
+                  Remove Game
+                </button>
+              ) : (
+                <button
+                  style={{ width: '100%', display: 'block', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 6, padding: '12px 0', fontWeight: 700, cursor: 'pointer', fontSize: '1.08rem', marginTop: 8 }}
+                  onClick={() => {/* TODO: Add game logic */}}
+                >
+                  Add Game
+                </button>
+              )}
             </div>
           </div>
         ))}

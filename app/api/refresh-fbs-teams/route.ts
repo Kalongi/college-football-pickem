@@ -10,7 +10,7 @@ const client = generateClient<Schema>();
 const CFBD_API_KEY = "9anqqpEw3ZvZGClSNpcAeO/THnMIDUVU3y/cd4n0FvmZru537vkEMFgffxCUw5eE"; // <-- Replace with your actual key
 
 async function deleteAllTeams() {
-  // @ts-expect-error
+  // @ts-expect-error Amplify Data client type is too complex for TS
   const teamResult = await client.models.Team.list();
   const { data: teams } = teamResult;
   for (const team of teams) {
@@ -19,9 +19,9 @@ async function deleteAllTeams() {
 }
 
 async function deleteAllConferences() {
-  // @ts-expect-error
-  const conferenceResult = await client.models.Conference.list();
-  const { data: conferences } = conferenceResult;
+  // @ts-expect-error Amplify Data client type is too complex for TS
+  const confResult = await client.models.Conference.list();
+  const { data: conferences } = confResult;
   for (const conf of conferences) {
     await client.models.Conference.delete({ id: conf.id });
   }
