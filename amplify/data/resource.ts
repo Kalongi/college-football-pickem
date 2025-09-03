@@ -28,13 +28,14 @@ const schema = a.schema({
     games: a.hasMany('Game', 'weekId'),
     userPicks: a.hasMany('UserPick', 'weekId'),
   }).authorization((allow) => [allow.publicApiKey()]),
-  Game: a.model({
+  Game: a.model({ 
     weekId: a.id().required(),
     homeTeamId: a.id().required(),
     awayTeamId: a.id().required(),
     spreadTeamId: a.id().required(),
     spread: a.float().required(),
     winningTeamId: a.id().required(),
+    kickoffUtc: a.datetime().required(),
     gameScores: a.hasMany('GameScore', 'gameId'),
     userPicks: a.hasMany('UserPick', 'gameId'),
     homeTeam: a.belongsTo('Team', 'homeTeamId'),
